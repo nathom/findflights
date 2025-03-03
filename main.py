@@ -355,7 +355,7 @@ def save_csv(pairs, path):
 
 
 parser = argparse.ArgumentParser(
-    description="Find the cheapest/fastest flights (using Skiplagged)!"
+    description="cli for round-trip flight search via headless browser simulation (parallel)"
 )
 parser.add_argument(
     "origin", help="comma separated candidate source airports (e.g. SAN,SNA,LAX)"
@@ -372,6 +372,12 @@ parser.add_argument(
     dest="return_range",
     required=True,
     help="return date range (e.g. 3/9-3/10)",
+)
+# new weekend flag - if provided, computes weekend dates automatically
+parser.add_argument(
+    "--weekend",
+    default=None,
+    help="specify a date (mm/dd or mm/dd/yyyy) for a weekend trip; computes depart as friday/saturday and return as sunday/monday",
 )
 parser.add_argument(
     "--top", type=int, default=5, help="number of top results to show (default 5)"
@@ -421,12 +427,41 @@ args = parser.parse_args()
 def main():
     sources = [s.strip().upper() for s in args.origin.split(",")]
     dests = [d.strip().upper() for d in args.destinations.split(",")]
-    try:
-        depart_dates = parse_date_range(args.depart)
-        return_dates = parse_date_range(args.return_range)
-    except Exception as e:
-        console.print(f"[red]error parsing date ranges: {e}[/red]")
-        sys.exit(1)
+
+    # if weekend flag is provided, compute weekend dates; else use provided ranges
+    if args.weekend:
+        try:
+            weekend_date = parse_date(args.weekend)
+        except Exception as e:
+            console.print(f"[red]error parsing weekend date: {e}[/red]")
+            sys.exit(1)
+        wd = weekend_date.weekday()
+        # valid weekend days: friday (4), saturday (5), sunday (6), monday (0)
+        if wd not in (4, 5, 6, 0):
+            console.print(
+                f"[red]provided weekend date {args.weekend} is not part of a weekend (fri-sat-sun-mon)[/red]"
+            )
+            sys.exit(1)
+        if wd == 4:  # friday
+            friday_date = weekend_date
+        elif wd == 5:  # saturday
+            friday_date = weekend_date - datetime.timedelta(days=1)
+        elif wd == 6:  # sunday
+            friday_date = weekend_date - datetime.timedelta(days=2)
+        elif wd == 0:  # monday
+            friday_date = weekend_date - datetime.timedelta(days=3)
+        depart_dates = [friday_date, friday_date + datetime.timedelta(days=1)]
+        return_dates = [
+            friday_date + datetime.timedelta(days=2),
+            friday_date + datetime.timedelta(days=3),
+        ]
+    else:
+        try:
+            depart_dates = parse_date_range(args.depart)
+            return_dates = parse_date_range(args.return_range)
+        except Exception as e:
+            console.print(f"[red]error parsing date ranges: {e}[/red]")
+            sys.exit(1)
 
     exclude_airlines = (
         [x.strip().lower() for x in args.exclude.split(",") if x.strip()]
