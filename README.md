@@ -53,11 +53,11 @@ findflights --help
 ```
 
 ```
-usage: findflights [-h] --depart DEPART --return RETURN_RANGE [--top TOP] [--sort {price,total time}] [--exclude EXCLUDE]
-                   [--save-csv SAVE_CSV] [--depart-time-range DEPART_TIME_RANGE] [--direct | --no-direct] [--workers WORKERS]
-                   origin destinations
+usage: main.py [-h] --depart DEPART --return RETURN_RANGE [--top TOP] [--sort {price,total time}] [--exclude EXCLUDE]
+               [--save-csv SAVE_CSV] [--depart-time-range DEPART_TIME_RANGE] [--direct | --no-direct] [--workers WORKERS]
+               origin destinations
 
-cli for round-trip flight search via headless browser simulation (parallel)
+Find the cheapest/fastest flights (using Skiplagged)!
 
 positional arguments:
   origin                comma separated candidate source airports (e.g. SAN,SNA,LAX)
