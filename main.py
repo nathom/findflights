@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import argparse
 import concurrent.futures
 import csv
@@ -54,6 +53,11 @@ def parse_date(date_str, default_year=None):
 
 
 def parse_date_range(range_str):
+    # if no '-' present, treat it as a single date
+    if "-" not in range_str:
+        today = datetime.date.today()
+        single_date = parse_date(range_str, default_year=today.year)
+        return [single_date]
     parts = range_str.split("-")
     if len(parts) != 2:
         raise ValueError("date range must be in 'start-end' format")
@@ -365,13 +369,13 @@ parser.add_argument(
     help="comma separated candidate destination airports (e.g. SFO,OAK,SJC)",
 )
 parser.add_argument(
-    "--depart", required=True, help="outbound date range (e.g. 3/7-3/8)"
+    "--depart", required=True, help="outbound date or date range (e.g. 3/7 or 3/7-3/8)"
 )
 parser.add_argument(
     "--return",
     dest="return_range",
     required=True,
-    help="return date range (e.g. 3/9-3/10)",
+    help="return date or date range (e.g. 3/9 or 3/9-3/10)",
 )
 # new weekend flag - if provided, computes weekend dates automatically
 parser.add_argument(
@@ -428,7 +432,7 @@ def main():
     sources = [s.strip().upper() for s in args.origin.split(",")]
     dests = [d.strip().upper() for d in args.destinations.split(",")]
 
-    # if weekend flag is provided, compute weekend dates; else use provided ranges
+    # if weekend flag is provided, compute weekend dates; else use provided dates/ranges
     if args.weekend:
         try:
             weekend_date = parse_date(args.weekend)
@@ -460,7 +464,7 @@ def main():
             depart_dates = parse_date_range(args.depart)
             return_dates = parse_date_range(args.return_range)
         except Exception as e:
-            console.print(f"[red]error parsing date ranges: {e}[/red]")
+            console.print(f"[red]error parsing date(s): {e}[/red]")
             sys.exit(1)
 
     exclude_airlines = (
