@@ -1,7 +1,7 @@
 # findflights
 
 This simple command line app automates the process of searching various sites
-for the cheapest flights. 
+for the cheapest roundtrip flight configuration.
 
 For example, if you want to travel from Southern California to the Bay Area and *only* care about
 the flight price, you can run
