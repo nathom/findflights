@@ -307,7 +307,7 @@ def display_pairs(pairs, top, sort_metric, depart_time_range):
         )
         flight_time = f"{p['total_dur']} min"
         stay_str = (
-            humanize_duration(p["stay_dur"]) if p["stay_dur"] is not None else "n/a"
+            humanize_duration(p["total_dur"]) if p["total_dur"] is not None else "n/a"
         )
         out_date_str = format_date_with_day(p["out_date"])
         in_date_str = format_date_with_day(p["in_date"])
@@ -369,12 +369,11 @@ parser.add_argument(
     help="comma separated candidate destination airports (e.g. SFO,OAK,SJC)",
 )
 parser.add_argument(
-    "--depart", required=True, help="outbound date or date range (e.g. 3/7 or 3/7-3/8)"
+    "--depart", help="outbound date or date range (e.g. 3/7 or 3/7-3/8)"
 )
 parser.add_argument(
     "--return",
     dest="return_range",
-    required=True,
     help="return date or date range (e.g. 3/9 or 3/9-3/10)",
 )
 # new weekend flag - if provided, computes weekend dates automatically
@@ -435,7 +434,8 @@ def main():
     # if weekend flag is provided, compute weekend dates; else use provided dates/ranges
     if args.weekend:
         try:
-            weekend_date = parse_date(args.weekend)
+            today = datetime.date.today()
+            weekend_date = parse_date(args.weekend, default_year=today.year)
         except Exception as e:
             console.print(f"[red]error parsing weekend date: {e}[/red]")
             sys.exit(1)
