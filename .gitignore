@@ -10,3 +10,7 @@ wheels/
 .venv
 .DS_Store
 flight_data/
+ui/node_modules
+ui/build
+ui/public
+
