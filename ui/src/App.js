@@ -1,402 +1,307 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useState, useMemo, useEffect } from 'react';
 import ReactFlow, {
-  Controls,
-  Background,
-  useNodesState,
-  useEdgesState,
   addEdge,
   MarkerType,
+  Panel,
+  useNodesState,
+  useEdgesState,
+  ConnectionMode,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
-
-import Header from './components/Header';
-import FlightResults from './components/FlightResults';
-import Sidebar from './components/Sidebar';
-import GlobalConstraints from './components/GlobalConstraints';
+import { v4 as uuidv4 } from 'uuid';
 import AirportNode from './components/nodes/AirportNode';
-import TourNode from './components/nodes/TourNode';
-import EdgeLabel from './components/edges/EdgeLabel';
 import EdgeConfig from './components/edges/EdgeConfig';
-import { fetchAirports, searchFlights } from './api';
+import { validateGraph, formatCycle } from './utils/graphValidator';
 
-// Node types for the graph
 const nodeTypes = {
-  airportNode: AirportNode,
-  tourNode: TourNode,
+  airport: AirportNode,
 };
 
-// Edge types for the graph
 const edgeTypes = {
-  flightEdge: EdgeLabel,
+  dateRange: EdgeConfig,
 };
 
-// Initial positions for new nodes
-const initialNodePosition = { x: 250, y: 100 };
-
-function App() {
-  // State for graph elements
+const App = () => {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  
-  // State for airports data
-  const [airports, setAirports] = useState([]);
-  
-  // State for global constraints
-  const [globalConstraints, setGlobalConstraints] = useState({
-    top: 5,
-    sort: 'price',
-    exclude: '',
-    departTimeRange: '',
-    direct: true,
-    workers: 5,
-  });
-  
-  // State for edge configuration
-  const [selectedEdge, setSelectedEdge] = useState(null);
-  const [edgeConfigPosition, setEdgeConfigPosition] = useState({ x: 0, y: 0 });
-  
-  // State for search results
-  const [searchResults, setSearchResults] = useState(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState(null);
-  
-  // Load airports on component mount
-  useEffect(() => {
-    async function loadAirports() {
-      try {
-        const airportsData = await fetchAirports();
-        setAirports(airportsData);
-      } catch (err) {
-        setError('Failed to load airports. Please refresh the page.');
-        console.error(err);
-      }
-    }
-    
-    loadAirports();
-  }, []);
-  
-  // Handle adding a new node to the graph
-  const onDragOver = useCallback((event) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = 'move';
-  }, []);
-  
-  const onDrop = useCallback(
-    (event) => {
-      event.preventDefault();
-      
-      const nodeType = event.dataTransfer.getData('application/reactflow');
-      
-      if (typeof nodeType === 'undefined' || !nodeType) {
-        return;
-      }
-      
-      // Get the position from the drop event
-      const position = {
-        x: event.clientX - initialNodePosition.x,
-        y: event.clientY - initialNodePosition.y,
-      };
-      
-      // Create a new node based on the type
-      let newNode = {
-        id: `${nodeType}-${Date.now()}`,
-        position,
-        data: { label: nodeType === 'airportNode' ? 'Airport Node' : 'Tour Node' },
-      };
-      
-      if (nodeType === 'airportNode') {
-        newNode.type = 'airportNode';
-        newNode.data = {
-          airports: airports.slice(0, 5).map(a => a.code),
-          dateRange: {
-            start: new Date().toISOString().split('T')[0],
-            end: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-          },
-          updateNodeData: updateNodeData,
-        };
-      } else if (nodeType === 'tourNode') {
-        newNode.type = 'tourNode';
-        newNode.data = {
-          requiredCities: [],
-          optionalCities: [],
-          minVisits: 0,
-          maxVisits: 0,
-          dateRange: {
-            start: new Date().toISOString().split('T')[0],
-            end: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-          },
-          updateNodeData: updateNodeData,
-          allAirports: airports,
-        };
-      }
-      
-      setNodes((nds) => nds.concat(newNode));
-    },
-    [airports, setNodes]
-  );
-  
-  // Update node data when it changes
-  const updateNodeData = (nodeId, newData) => {
-    setNodes((nds) =>
-      nds.map((node) => {
-        if (node.id === nodeId) {
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              ...newData,
-              updateNodeData, // Keep the update function
-              allAirports: airports, // Keep the airports list for tour nodes
-            },
-          };
-        }
-        return node;
-      })
-    );
-  };
-  
-  // Connect nodes with edges
+  const [selectedElements, setSelectedElements] = useState(null);
+  const [graphValid, setGraphValid] = useState(true);
+  const [validationError, setValidationError] = useState(null);
+
   const onConnect = useCallback(
     (params) => {
-      // Create a new edge with a unique ID
-      const newEdge = {
-        ...params,
-        id: `edge-${Date.now()}`,
-        type: 'flightEdge',
-        animated: true,
-        label: 'Flight',
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-        },
-        data: {
-          constraints: {
-            departTimeRange: '',
-            direct: true,
+      // Check if an edge already exists between these nodes
+      setEdges((eds) => {
+        // Check if this connection already exists
+        const edgeExists = eds.some(
+          (edge) => edge.source === params.source && edge.target === params.target
+        );
+        
+        // If edge already exists, don't add a new one
+        if (edgeExists) {
+          console.log('Edge already exists between these nodes');
+          return eds;
+        }
+        
+        // Create a new edge with unique ID
+        const edgeId = `edge-${uuidv4()}`;
+        
+        // Add the new edge
+        return addEdge(
+          {
+            ...params,
+            type: 'dateRange',
+            data: { 
+              dateRange: { start: new Date().toISOString().split('T')[0], end: new Date().toISOString().split('T')[0] },
+              onDateRangeChange: (dateRange) => {
+                setEdges(eds => 
+                  eds.map(edge => 
+                    edge.id === edgeId 
+                      ? { ...edge, data: { ...edge.data, dateRange } } 
+                      : edge
+                  )
+                );
+              }
+            },
+            id: edgeId,
+            markerEnd: {
+              type: MarkerType.ArrowClosed,
+              width: 20,
+              height: 20,
+              color: '#888',
+            },
           },
-        },
-      };
-      
-      setEdges((eds) => addEdge(newEdge, eds));
+          eds
+        );
+      });
     },
     [setEdges]
   );
-  
-  // Handle edge click for configuration
-  const onEdgeClick = useCallback((event, edge) => {
-    // Set the edge configuration position
-    setEdgeConfigPosition({
-      x: event.clientX,
-      y: event.clientY,
-    });
+
+  const addNode = () => {
+    const nodeId = `node-${uuidv4()}`;
     
-    // Set the selected edge
-    setSelectedEdge(edge);
-  }, []);
-  
-  // Update edge data
-  const updateEdgeData = (edgeId, newData) => {
-    setEdges((eds) =>
-      eds.map((edge) => {
-        if (edge.id === edgeId) {
-          return {
-            ...edge,
-            data: {
-              ...edge.data,
-              ...newData,
-            },
-          };
-        }
-        return edge;
-      })
-    );
-  };
-  
-  // Close edge configuration
-  const closeEdgeConfig = () => {
-    setSelectedEdge(null);
-  };
-  
-  // Handle search button click
-  const handleSearch = async () => {
-    setIsLoading(true);
-    setError(null);
-    setSearchResults(null);
+    // Calculate position based on existing nodes to avoid overlap
+    let posX = 100 + Math.random() * 200;
+    let posY = 100 + Math.random() * 200;
     
-    try {
-      // Build the search graph structure
-      const graph = buildSearchGraph();
+    // If there are existing nodes, position the new one with some spacing
+    if (nodes.length > 0) {
+      // Find the rightmost node
+      const rightmostNode = nodes.reduce((max, node) => 
+        node.position.x > max.position.x ? node : max, nodes[0]);
       
-      // Call the API
-      const results = await searchFlights({
-        ...graph,
-        ...globalConstraints,
-      });
-      
-      setSearchResults(results);
-    } catch (err) {
-      setError(err.message || 'An error occurred during search');
-      console.error(err);
-    } finally {
-      setIsLoading(false);
+      // Position to the right of it
+      posX = rightmostNode.position.x + 200;
+      posY = rightmostNode.position.y;
     }
+    
+    const newNode = {
+      id: nodeId,
+      type: 'airport',
+      position: { x: posX, y: posY },
+      data: { 
+        airports: ['SFO'],
+        onAirportsChange: (airports) => {
+          setNodes(nds => 
+            nds.map(node => 
+              node.id === nodeId 
+                ? { ...node, data: { ...node.data, airports }} 
+                : node
+            )
+          );
+        } 
+      },
+    };
+    setNodes((nds) => [...nds, newNode]);
   };
-  
-  // Build the search graph structure from nodes and edges
-  const buildSearchGraph = () => {
-    const graph = {
+
+  const handleSearch = () => {
+    const graphData = {
       nodes: nodes.map(node => ({
         id: node.id,
-        type: node.type,
-        data: {
-          ...node.data,
-          updateNodeData: undefined, // Remove the function
-          allAirports: undefined, // Remove the airports list
-        },
+        airports: node.data.airports,
       })),
       edges: edges.map(edge => ({
-        id: edge.id,
         source: edge.source,
         target: edge.target,
-        data: edge.data,
+        dateRange: edge.data?.dateRange || { start: '', end: '' },
       })),
     };
     
-    // For simple round trip structure
-    const airportNodes = nodes.filter(node => node.type === 'airportNode');
-    const tourNodes = nodes.filter(node => node.type === 'tourNode');
-    
-    if (airportNodes.length === 2 && tourNodes.length === 0) {
-      // This is likely a simple round trip
-      const sourceNode = airportNodes[0];
-      const targetNode = airportNodes[1];
-      
-      // Check if there are edges connecting them
-      const outboundEdge = edges.find(e => e.source === sourceNode.id && e.target === targetNode.id);
-      const inboundEdge = edges.find(e => e.source === targetNode.id && e.target === sourceNode.id);
-      
-      if (outboundEdge && inboundEdge) {
-        // We have a round trip
-        return {
-          type: 'round_trip',
-          origin: sourceNode.data.airports.join(','),
-          destinations: targetNode.data.airports.join(','),
-          depart: sourceNode.data.dateRange.start,
-          return: targetNode.data.dateRange.start,
-          departTimeRange: outboundEdge.data?.constraints?.departTimeRange || '',
-          direct: outboundEdge.data?.constraints?.direct || true,
-        };
-      }
-    }
-    
-    // If we have tour nodes
-    if (tourNodes.length > 0) {
-      const tourNode = tourNodes[0]; // Use the first tour node
-      const connectedAirportNodes = airportNodes.filter(node => 
-        edges.some(e => e.source === node.id && e.target === tourNode.id) ||
-        edges.some(e => e.source === tourNode.id && e.target === node.id)
-      );
-      
-      if (connectedAirportNodes.length > 0) {
-        // This is a tour with connected airport nodes
-        return {
-          type: 'flexible_tour',
-          origin: connectedAirportNodes[0].data.airports.join(','),
-          destinations: [...tourNode.data.requiredCities, ...tourNode.data.optionalCities].join(','),
-          depart: connectedAirportNodes[0].data.dateRange.start,
-          return: connectedAirportNodes[0].data.dateRange.end,
-          requiredCities: tourNode.data.requiredCities.join(','),
-          optionalCities: tourNode.data.optionalCities.join(','),
-          minVisits: tourNode.data.minVisits,
-          maxVisits: tourNode.data.maxVisits,
-        };
-      }
-    }
-    
-    // Default - create a search graph that contains all nodes and edges
-    return {
-      type: 'custom',
-      graphData: graph,
-    };
+    console.log('Graph Structure:', graphData);
   };
+
+  // Handle keyboard shortcuts including Delete key
+  React.useEffect(() => {
+    const handleKeyDown = (event) => {
+      // Handle Delete key
+      if (event.key === 'Delete' || event.key === 'Backspace') {
+        // If there are selected elements from ReactFlow's selection mechanism
+        if (selectedElements) {
+          if (selectedElements.edges && selectedElements.edges.length > 0) {
+            setEdges((eds) => eds.filter(e => !selectedElements.edges.includes(e.id)));
+          }
+          if (selectedElements.nodes && selectedElements.nodes.length > 0) {
+            // Remove any connected edges first
+            setEdges((eds) => eds.filter(e => !selectedElements.nodes.includes(e.source) && !selectedElements.nodes.includes(e.target)));
+            // Then remove the nodes
+            setNodes((nds) => nds.filter(n => !selectedElements.nodes.includes(n.id)));
+          }
+        }
+      }
+    };
+
+    // Add the event listener
+    window.addEventListener('keydown', handleKeyDown);
+    
+    // Clean up
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [selectedElements, setEdges, setNodes]);
+
+  // Handle for selection changes
+  const onSelectionChange = (params) => {
+    setSelectedElements(params);
+  };
+
+  // Edge click handler
+  const onEdgeClick = (event, edge) => {
+    // The actual editing is handled in the EdgeConfig component
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  // Define custom styling for React Flow components
+  const customEdgeStyles = useMemo(() => ({
+    edge: {
+      strokeWidth: 2,
+      stroke: '#888',
+    },
+    edgeLabel: {
+      fontSize: 12,
+      fill: '#333',
+      fontWeight: 500,
+    },
+  }), []);
   
-  return (
-    <div className="app">
-      <Header />
+  // Validate graph whenever nodes or edges change
+  useEffect(() => {
+    if (edges.length === 0) {
+      // No edges, graph is valid
+      setGraphValid(true);
+      setValidationError(null);
+      return;
+    }
+    
+    // Convert the graph to the format expected by the validator
+    const flights = edges.map(edge => {
+      // Get date range from each edge
+      const dateRange = edge.data?.dateRange || { 
+        start: new Date().toISOString().split('T')[0], 
+        end: new Date().toISOString().split('T')[0] 
+      };
       
-      <div className="d-flex">
-        <Sidebar 
-          airports={airports}
-        />
-        
-        <div className="content-with-sidebar">
-          <GlobalConstraints 
-            constraints={globalConstraints}
-            setConstraints={setGlobalConstraints}
-          />
-          
-          <div className="search-controls">
-            <h3>Flight Search Graph</h3>
-            <button 
-              className="btn btn-primary"
-              onClick={handleSearch}
-              disabled={isLoading || nodes.length === 0}
-            >
-              {isLoading ? 'Searching...' : 'Search Flights'}
-            </button>
-          </div>
-          
-          {error && (
-            <div className="card" style={{ backgroundColor: '#f8d7da', borderColor: '#f5c6cb' }}>
-              <p style={{ color: '#721c24' }}>{error}</p>
-            </div>
-          )}
-          
-          <div className="graph-container">
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              onEdgeClick={onEdgeClick}
-              onDragOver={onDragOver}
-              onDrop={onDrop}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              fitView
-            >
-              <Background />
-              <Controls />
-            </ReactFlow>
-            
-            {selectedEdge && (
-              <EdgeConfig
-                edge={selectedEdge}
-                position={edgeConfigPosition}
-                onClose={closeEdgeConfig}
-                updateEdgeData={updateEdgeData}
-              />
-            )}
-          </div>
-          
-          {isLoading && (
-            <div className="search-loader">
-              <p>Searching for flights... This might take a moment.</p>
-            </div>
-          )}
-          
-          {searchResults && !isLoading && (
-            <div className="search-results">
-              <FlightResults 
-                results={searchResults.results}
-                total={searchResults.total}
-              />
-            </div>
-          )}
+      // Get source and target airports
+      const sourceNode = nodes.find(n => n.id === edge.source);
+      const targetNode = nodes.find(n => n.id === edge.target);
+      
+      // Use first airport if multiple are defined
+      const sourceAirport = sourceNode?.data?.airports?.[0] || 'Unknown';
+      const targetAirport = targetNode?.data?.airports?.[0] || 'Unknown';
+      
+      return {
+        id: edge.id,
+        source: sourceAirport,
+        target: targetAirport,
+        // Use start date as departure with 00:00 time
+        departure: `${dateRange.start}T00:00:00`,
+        // Use end date as arrival with 23:59 time
+        arrival: `${dateRange.end}T23:59:00`,
+        edgeId: edge.id,
+        sourceNodeId: edge.source,
+        targetNodeId: edge.target
+      };
+    });
+    
+    // Validate the graph
+    const result = validateGraph(flights);
+    setGraphValid(result.valid);
+    
+    if (!result.valid) {
+      // Format the invalid cycle for display
+      setValidationError(formatCycle(result.invalidCycle));
+    } else {
+      setValidationError(null);
+    }
+  }, [nodes, edges]);
+
+  return (
+    <div className="app-container">
+      {!graphValid && (
+        <div 
+          style={{
+            position: 'absolute',
+            top: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            background: '#f44336',
+            color: 'white',
+            padding: '10px 15px',
+            borderRadius: '4px',
+            zIndex: 1000,
+            boxShadow: '0 2px 10px rgba(0,0,0,0.2)',
+            maxWidth: '80%',
+            textAlign: 'center'
+          }}
+        >
+          <strong>Invalid Graph:</strong> The graph contains cycles that cannot be unrolled based on dates.<br />
+          {validationError && <span>Invalid cycle: {validationError}</span>}
         </div>
-      </div>
+      )}
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
+        onSelectionChange={onSelectionChange}
+        onEdgeClick={onEdgeClick}
+        nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
+        style={{ background: '#f8f8f8' }}
+        defaultEdgeOptions={{
+          type: 'dateRange',
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: '#888',
+          },
+        }}
+        connectionMode={ConnectionMode.Loose}
+        defaultViewport={{ zoom: 0.75, x: 0, y: 0 }}
+        elementsSelectable={true}
+        selectNodesOnDrag={false}
+        panOnDrag={true}
+        panOnScroll={false}
+        zoomOnScroll={true}
+        snapToGrid={true}
+        snapGrid={[15, 15]}
+        minZoom={0.2}
+        maxZoom={4}
+        deleteKeyCode={['Delete', 'Backspace']}
+      >
+        <Panel position="top-right">
+          <button onClick={addNode}>
+            Add Airport Node
+          </button>
+          <button onClick={handleSearch}>
+            Search
+          </button>
+        </Panel>
+      </ReactFlow>
     </div>
   );
-}
+};
 
 export default App;

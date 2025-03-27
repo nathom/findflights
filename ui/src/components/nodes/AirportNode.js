@@ -1,117 +1,184 @@
-import React, { useState, memo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Handle, Position } from 'reactflow';
 
-const AirportNode = memo(({ id, data }) => {
+const AirportNode = ({ data, isConnectable }) => {
   const [isEditing, setIsEditing] = useState(false);
-  const [tempAirports, setTempAirports] = useState(data.airports.join(','));
-  const [startDate, setStartDate] = useState(data.dateRange.start);
-  const [endDate, setEndDate] = useState(data.dateRange.end);
+  const [airports, setAirports] = useState(data.airports || ['SFO']);
+  const [newAirport, setNewAirport] = useState('');
   
-  const handleSave = () => {
-    // Parse the airports string
-    const airports = tempAirports.split(',').map(a => a.trim().toUpperCase()).filter(Boolean);
-    
-    // Update node data
-    data.updateNodeData(id, {
-      airports,
-      dateRange: {
-        start: startDate,
-        end: endDate
-      }
-    });
-    
-    setIsEditing(false);
+  // Update parent component when airports change
+  useEffect(() => {
+    if (data.onAirportsChange) {
+      data.onAirportsChange(airports);
+    }
+  }, [airports, data]);
+
+  const handleClick = () => {
+    setIsEditing(true);
   };
-  
-  const handleCancel = () => {
-    setTempAirports(data.airports.join(','));
-    setStartDate(data.dateRange.start);
-    setEndDate(data.dateRange.end);
-    setIsEditing(false);
+
+  const handleAddAirport = () => {
+    if (newAirport.trim()) {
+      setAirports([...airports, newAirport.trim().toUpperCase()]);
+      setNewAirport('');
+    }
   };
-  
+
+  const handleBlur = () => {
+    setIsEditing(false);
+    // Keep at least one airport
+    if (airports.length === 0) {
+      setAirports(['SFO']);
+    }
+  };
+
+  const handleRemoveAirport = (index) => {
+    const newAirports = [...airports];
+    newAirports.splice(index, 1);
+    setAirports(newAirports);
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter') {
+      handleAddAirport();
+    }
+  };
+
   return (
-    <div className="airport-node">
-      {/* Handles for connecting edges */}
-      <Handle type="target" position={Position.Left} />
-      <Handle type="source" position={Position.Right} />
+    <div style={{ 
+      padding: '10px',
+      borderRadius: '10px',
+      background: 'white',
+      border: '1px solid #ddd',
+      minWidth: '100px',
+      minHeight: '60px',
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'center',
+      alignItems: 'center',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+      position: 'relative'
+    }}>
+      {/* Top handle */}
+      <Handle
+        type="source"
+        position={Position.Top}
+        id="top"
+        isConnectable={isConnectable}
+        style={{ 
+          opacity: 0,
+          width: '60%',
+          height: '14px',
+          top: '-7px',
+          borderRadius: '4px',
+          transform: 'none',
+          left: '20%',
+          zIndex: 1
+        }}
+      />
       
-      <div className="airport-node-header">
-        Airport Set
-        {!isEditing && (
-          <button 
-            className="node-menu-button"
-            onClick={() => setIsEditing(true)}
-          >
-            ✏️
-          </button>
-        )}
-      </div>
+      {/* Right handle */}
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="right"
+        isConnectable={isConnectable}
+        style={{ 
+          opacity: 0,
+          width: '14px',
+          height: '60%',
+          right: '-7px',
+          borderRadius: '4px',
+          transform: 'none',
+          top: '20%',
+          zIndex: 1
+        }}
+      />
+      
+      {/* Bottom handle */}
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        id="bottom"
+        isConnectable={isConnectable}
+        style={{ 
+          opacity: 0,
+          width: '60%',
+          height: '14px',
+          bottom: '-7px',
+          borderRadius: '4px',
+          transform: 'none',
+          left: '20%',
+          zIndex: 1
+        }}
+      />
+      
+      {/* Left handle */}
+      <Handle
+        type="source"
+        position={Position.Left}
+        id="left"
+        isConnectable={isConnectable}
+        style={{ 
+          opacity: 0,
+          width: '14px',
+          height: '60%',
+          left: '-7px',
+          borderRadius: '4px',
+          transform: 'none',
+          top: '20%',
+          zIndex: 1
+        }}
+      />
       
       {isEditing ? (
-        <div>
-          <div className="form-group">
-            <label className="form-label">Airports</label>
+        <div style={{ padding: '5px', width: '100%' }}>
+          {airports.map((airport, index) => (
+            <div key={index} style={{ margin: '5px 0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ marginRight: '5px' }}>{airport}</span>
+              <button 
+                onClick={() => handleRemoveAirport(index)}
+                style={{ 
+                  border: 'none', 
+                  background: '#f44336', 
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '18px',
+                  height: '18px',
+                  fontSize: '10px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  padding: 0
+                }}
+              >
+                ×
+              </button>
+            </div>
+          ))}
+          <div style={{ marginTop: '5px', display: 'flex' }}>
             <input
               type="text"
-              className="form-control"
-              value={tempAirports}
-              onChange={(e) => setTempAirports(e.target.value)}
-              placeholder="e.g. SFO,OAK,SJC"
+              value={newAirport}
+              onChange={(e) => setNewAirport(e.target.value)}
+              placeholder="Airport"
+              style={{ width: '60px', marginRight: '5px' }}
+              onKeyPress={handleKeyPress}
             />
-            <small>Comma-separated airport codes</small>
+            <button onClick={handleAddAirport} style={{ fontSize: '12px' }}>Add</button>
           </div>
-          
-          <div className="form-group">
-            <label className="form-label">Date Range Start</label>
-            <input
-              type="date"
-              className="form-control"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-            />
-          </div>
-          
-          <div className="form-group">
-            <label className="form-label">Date Range End</label>
-            <input
-              type="date"
-              className="form-control"
-              value={endDate}
-              onChange={(e) => setEndDate(e.target.value)}
-            />
-          </div>
-          
-          <div className="d-flex space-between">
-            <button className="btn btn-secondary" onClick={handleCancel}>
-              Cancel
-            </button>
-            <button className="btn btn-primary" onClick={handleSave}>
-              Save
-            </button>
-          </div>
+          <button onClick={handleBlur} style={{ marginTop: '5px', fontSize: '12px', width: '100%' }}>Done</button>
         </div>
       ) : (
-        <div>
-          <div className="mb-2">
-            <strong>Airports:</strong>
-            <div>
-              {data.airports.map((airport, i) => (
-                <span key={i} className="airport-tag">
-                  {airport}
-                </span>
-              ))}
-            </div>
-          </div>
-          
-          <div className="mb-2">
-            <strong>Date Range:</strong>
-            <div>{data.dateRange.start} to {data.dateRange.end}</div>
-          </div>
+        <div onClick={handleClick} style={{ cursor: 'pointer', textAlign: 'center' }}>
+          {airports.map((airport, i) => (
+            <div key={i}>{airport}</div>
+          ))}
         </div>
       )}
     </div>
   );
-});
+};
 
 export default AirportNode;

@@ -16,6 +16,75 @@ from asgiref.wsgi import WsgiToAsgi
 from hypercorn.asyncio import serve
 from hypercorn.config import Config as HyperConfig
 
+# Graph validation functions
+def find_cycles(flights):
+    # build an index: source -> list of flights
+    flights_by_source = {}
+    for flight in flights:
+        flights_by_source.setdefault(flight['source'], []).append(flight)
+
+    cycles = []
+
+    def dfs(node, start, path, visited):
+        # if we loop back to start (and path is non-empty) record a cycle
+        if node in visited:
+            if node == start and path:
+                cycles.append(path)
+            return
+        # add current node to visited (copy to avoid affecting other dfs branches)
+        for flight in flights_by_source.get(node, []):
+            dfs(flight['target'], start, path + [flight], visited | {node})
+
+    # run dfs from every node
+    nodes = set()
+    for flight in flights:
+        nodes.add(flight['source'])
+        nodes.add(flight['target'])
+    for node in nodes:
+        dfs(node, node, [], set())
+    return cycles
+
+def is_time_respecting(cycle):
+    # a cycle is time-respecting if each flight's departure is strictly after the previous flight's arrival
+    if not cycle:
+        return True
+    current_arrival = None
+    for flight in cycle:
+        if current_arrival is not None and flight['departure'] <= current_arrival:
+            return False
+        current_arrival = flight['arrival']
+    return True
+
+def validate_graph(flights):
+    # check every cycle for time-respecting order
+    cycles = find_cycles(flights)
+    for cycle in cycles:
+        if not is_time_respecting(cycle):
+            return False, cycle
+    return True, None
+
+def dfs_unroll(current_node, current_time, flights, path, results, depth, max_depth):
+    if depth >= max_depth:
+        results.append(path)
+        return
+    extended = False
+    for flight in flights:
+        if flight['source'] == current_node and flight['departure'] > current_time:
+            extended = True
+            dfs_unroll(flight['target'], flight['arrival'], flights, path + [flight], results, depth + 1, max_depth)
+    if not extended:
+        results.append(path)
+
+def unroll_graph(flights, start_node, start_time, max_depth=10):
+    # check validity first: if any cycle is not time-respecting, raise an error
+    is_valid, invalid_cycle = validate_graph(flights)
+    if not is_valid:
+        raise ValueError(f"Graph contains cycles that are not time-respecting: {invalid_cycle}")
+    
+    results = []
+    dfs_unroll(start_node, start_time, flights, [], results, 0, max_depth)
+    return results
+
 app = Flask(__name__, static_folder='ui/build', static_url_path='')
 browser = None
 playwright = None
@@ -236,6 +305,65 @@ async def search():
         # Return top results
         return jsonify({'results': sorted_flights[:top], 'total': len(sorted_flights)})
 
+
+@app.route('/api/validate', methods=['POST'])
+async def validate_route():
+    data = request.json
+    flights = data.get('flights', [])
+    try:
+        is_valid, invalid_cycle = validate_graph(flights)
+        if is_valid:
+            return jsonify({'valid': True, 'message': 'Graph is valid'})
+        else:
+            return jsonify({
+                'valid': False, 
+                'message': 'Graph contains cycles that are not time-respecting',
+                'invalid_cycle': invalid_cycle
+            })
+    except Exception as e:
+        return jsonify({'valid': False, 'message': str(e)})
+
+@app.route('/api/unroll', methods=['POST'])
+async def unroll_route():
+    data = request.json
+    flights = data.get('flights', [])
+    start_node = data.get('start_node')
+    start_time = data.get('start_time', 0)
+    max_depth = data.get('max_depth', 10)
+    
+    try:
+        paths = unroll_graph(flights, start_node, start_time, max_depth)
+        formatted_paths = []
+        for p in paths:
+            if p:
+                # Format the path for response
+                route = []
+                for i, f in enumerate(p):
+                    # Add source node
+                    route.append({
+                        'node': f['source'],
+                        'departure': f['departure'],
+                        'arrival': f['arrival']
+                    })
+                    # Add target node if this is the last flight
+                    if i == len(p) - 1:
+                        route.append({
+                            'node': f['target']
+                        })
+                formatted_paths.append(route)
+            else:
+                # Just the start node if there are no flights
+                formatted_paths.append([{'node': start_node}])
+        
+        return jsonify({
+            'valid': True,
+            'paths': formatted_paths
+        })
+    except ValueError as e:
+        return jsonify({
+            'valid': False,
+            'message': str(e)
+        })
 
 @app.route('/api/airports', methods=['GET'])
 def get_airports():
