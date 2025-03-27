@@ -1,23 +1,13 @@
-import argparse
 import asyncio
-import concurrent.futures
 import csv
 import datetime
 import json
 import re
-import sys
 from itertools import product
 
 from bs4 import BeautifulSoup
 from playwright.async_api import async_playwright
 from rich.console import Console
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    BarColumn,
-    TimeRemainingColumn,
-    TextColumn,
-)
 from rich.table import Table
 
 console = Console()
@@ -68,8 +58,7 @@ def parse_date_range(range_str):
 async def create_browser():
     playwright = await async_playwright().start()
     browser = await playwright.chromium.launch(
-        headless=True,
-        args=["--disable-gpu", "--no-sandbox"]
+        headless=True, args=["--disable-gpu", "--no-sandbox"]
     )
     return browser, playwright
 
@@ -77,9 +66,11 @@ async def create_browser():
 async def fetch_flights_page(origin, destination, depart_date, browser):
     url = f"https://skiplagged.com/flights/{origin}/{destination}/{depart_date.isoformat()}"
     page = await browser.new_page()
-    await page.set_extra_http_headers({
-        "User-Agent": "mozilla/5.0 (macintosh; intel mac os x 10_15_7) applewebkit/605.1.15 (khtml, like gecko) version/18.0.1 safari/605.1.15"
-    })
+    await page.set_extra_http_headers(
+        {
+            "User-Agent": "mozilla/5.0 (macintosh; intel mac os x 10_15_7) applewebkit/605.1.15 (khtml, like gecko) version/18.0.1 safari/605.1.15"
+        }
+    )
     try:
         await page.goto(url)
         try:
@@ -103,6 +94,7 @@ async def fetch_flights_page(origin, destination, depart_date, browser):
     finally:
         await page.close()
     return html
+
 
 def parse_flights(html, origin, destination):
     soup = BeautifulSoup(html, "html.parser")
@@ -189,19 +181,10 @@ def parse_flights(html, origin, destination):
         flights.append(flight)
     return flights
 
+
 async def search_flights(origin, destination, depart_date, browser):
     html = await fetch_flights_page(origin, destination, depart_date, browser)
     return parse_flights(html, origin, destination)
-
-
-async def fetch_flights_for_page(origin, destination, depart_date):
-    browser, playwright = await create_browser()
-    try:
-        flights = await search_flights(origin, destination, depart_date, browser)
-    finally:
-        await browser.close()
-        await playwright.stop()
-    return flights
 
 
 def parse_duration_str(dur_str):
@@ -290,6 +273,60 @@ def format_date_with_day(date_str):
         return date_str
 
 
+def display_outbound(
+    flights, top=5, sort_metric="price", depart_time_range=None, direct=True
+):
+    # filter by depart time range if provided
+    if depart_time_range:
+        try:
+            start_str, end_str = depart_time_range.split("-")
+            start_time = datetime.datetime.strptime(start_str, "%H:%M").time()
+            end_time = datetime.datetime.strptime(end_str, "%H:%M").time()
+            flights = [
+                f
+                for f in flights
+                if start_time
+                <= datetime.datetime.strptime(
+                    f.get("dep_time", "00:00"), "%H:%M"
+                ).time()
+                <= end_time
+            ]
+        except Exception as e:
+            console.print(f"[red]error parsing depart time range: {e}[/red]")
+    # filter to only direct flights if enabled
+    if direct:
+        flights = [f for f in flights if "nonstop" in f.get("stops", "").lower()]
+    # sort flights
+    if sort_metric == "price":
+        sorted_flights = sorted(flights, key=lambda x: x.get("cost", 0))
+    elif sort_metric == "duration":
+        sorted_flights = sorted(
+            flights, key=lambda x: parse_duration_str(x.get("duration", ""))
+        )
+    else:
+        sorted_flights = flights
+    topn = sorted_flights[:top]
+    table = Table(title="outbound flight options")
+    table.add_column("route")
+    table.add_column("flight (dep-arr, duration)")
+    table.add_column("date")
+    table.add_column("price", justify="right")
+    table.add_column("airline")
+    table.add_column("direct?", justify="center")
+    for f in topn:
+        route = f"{f.get('from', '')} -> {f.get('to', '')}"
+        flight_str = f"{f.get('dep_time', '')} - {f.get('arr_time', '')} ({f.get('duration', '')})"
+        date_str = f.get("depart", "n/a")
+        price_str = (
+            f"${f.get('cost', 0)/100:.2f}" if f.get("cost") is not None else "n/a"
+        )
+        airline = f.get("airline", "n/a")
+        direct_str = "yes" if "nonstop" in f.get("stops", "").lower() else "no"
+        table.add_row(route, flight_str, date_str, price_str, airline, direct_str)
+    console.print(table)
+    return sorted_flights
+
+
 def display_pairs(pairs, top, sort_metric, depart_time_range, direct=False):
     # filter by outbound depart time range if provided
     if depart_time_range:
@@ -317,7 +354,9 @@ def display_pairs(pairs, top, sort_metric, depart_time_range, direct=False):
             and "nonstop" in p["in_stops"].lower()
         ]
     if sort_metric == "price":
-        sorted_pairs = sorted(pairs, key=lambda x: x["total_cost"])
+        sorted_pairs = sorted(
+            pairs, key=lambda x: x.get("total_cost", x.get("price", 0))
+        )
     elif sort_metric == "total time":
         sorted_pairs = sorted(
             pairs,
@@ -404,6 +443,7 @@ def save_csv(pairs, path):
         writer.writeheader()
         for row in pairs:
             writer.writerow(row)
+
 
 async def run_tasks(tasks, workers=5):
     results = []

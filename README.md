@@ -1,7 +1,8 @@
 # findflights
 
-This simple command line app automates the process of searching various sites
-for the cheapest roundtrip flight configuration.
+This application automates the process of searching various sites for the cheapest roundtrip flight configuration.
+
+## CLI Usage
 
 For example, if you want to travel from Southern California to the Bay Area and *only* care about
 the flight price, you can run
@@ -40,13 +41,44 @@ This will do the following:
 
 ![Table for Southern California to Bay Area flight options](./assets/socal_to_norcal_table.png)
 
-## Installation
+## Web UI
+
+The application now includes a web-based UI for easier interaction. The UI supports:
+
+- Simple flight search (round-trip and one-way)
+- Weekend trip planning
+- Advanced multi-city planning
+- Flexible tour routing (TSP-style)
+
+### Running the Web UI
+
+1. Install the required dependencies:
+```bash
+pip install -r requirements-ui.txt
+cd ui
+npm install
+```
+
+2. Build the React frontend:
+```bash
+cd ui
+npm run build
+```
+
+3. Start the server:
+```bash
+python server.py
+```
+
+4. Open your browser to `http://localhost:5000`
+
+## CLI Installation
 
 ```
 pip install findflights
 ```
 
-## Usage
+## CLI Usage
 
 ```
 findflights --help
